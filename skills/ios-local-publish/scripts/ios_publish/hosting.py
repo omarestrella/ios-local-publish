@@ -207,26 +207,28 @@ def manifest(metadata: dict, ipa_url: str) -> bytes:
       "kind": "software", "title": metadata["name"]}}]})
 
 
-def page(metadata: dict, install_url: str) -> bytes:
-  e = html.escape
-  title = e(str(metadata["name"]))
-  details = e(f"{metadata['version']} · Build {metadata['build']}")
-  expiry = e(metadata["expires_at"].split("T")[0])
-  size = metadata["size_bytes"] / (1024 * 1024)
-  return f"""<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark"><title>Install {title}</title>
-<style>
-:root{{font:17px/1.5 system-ui,-apple-system,sans-serif;color-scheme:light dark;background:light-dark(#f6f6f3,#161715);color:light-dark(#242621,#e7e8e3)}}
-body{{max-width:30rem;margin:12vh auto;padding:1.5rem}}h1{{font-size:2rem;line-height:1.2;letter-spacing:-.04em;margin:0 0 .5rem}}
-.muted{{opacity:.65}}.install{{display:block;text-align:center;background:light-dark(#38593c,#b4d0aa);color:light-dark(white,#142010);padding:1rem;border-radius:14px;text-decoration:none;font-weight:600;margin:2rem 0}}
-ol{{padding-left:1.3rem}}li{{padding:.3rem 0}}footer{{margin-top:2rem;font-size:.8rem;overflow-wrap:anywhere}}
-</style><body><p class="muted">ios-publish</p><h1>{title}</h1><p class="muted">{details} · {size:.1f} MB</p>
-<a class="install" href="{e(install_url, quote=True)}">Install {title}</a>
-<ol><li>Open this page in Safari with Tailscale connected.</li><li>Tap Install and approve the iOS prompt.</li><li>Wait for the app to finish installing on your Home Screen.</li></ol>
-<p class="muted">For registered devices only. Developer Mode must be enabled. Keep this Mac awake while installing. To update, install over the existing app to retain its data.</p>
-<footer class="muted">Signed through {expiry}<br>{e(metadata['bundle_id'])}<br>SHA-256 {e(metadata['sha256'])}</footer></body></html>
-""".encode()
+def page(metadata: dict, install_url: str, releases=(), apps=()) -> bytes:
+  from .console import render
+  return render(metadata, install_url, releases, apps)
+
+
+def refresh_console(state: Path, base_url: str):
+  releases = [json.loads(path.read_text()) for path in sorted((state / "releases").glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)]
+  releases = [r for r in releases if r.get("published")]
+  releases.sort(key=lambda r: r.get("published_at", ""), reverse=True)
+  apps = {}
+  for release in releases:
+    apps.setdefault(release["bundle_id"], release)
+  for bundle, latest in apps.items():
+    history = [r for r in releases if r["bundle_id"] == bundle]
+    atomic_write(state / "site" / "apps" / bundle / "index.html", page(latest, latest["install_url"], history, apps.values()))
+    for release in history:
+      release_page = state / "site" / "apps" / bundle / release["release_id"] / "index.html"
+      if release_page.parent.exists():
+        atomic_write(release_page, page({**release, "display_label": "Build"}, release["install_url"], history, apps.values()))
+  if releases:
+    latest = releases[0]
+    atomic_write(state / "site" / "index.html", page(latest, latest["install_url"], [r for r in releases if r["bundle_id"] == latest["bundle_id"]], apps.values()))
 
 
 def verify_hosted(release: dict) -> dict:
@@ -262,7 +264,8 @@ def publish_ipa(state: Path, metadata: dict, base_url: str) -> dict:
   release_url = f"{base_url}/{quote(relative, safe='/')}"
   manifest_url = release_url + "/manifest.plist"
   install_url = "itms-services://?" + urlencode({"action": "download-manifest", "url": manifest_url}, quote_via=quote)
-  result = {**metadata, "release_id": release_id, "install_page_url": release_url + "/index.html",
+  from datetime import datetime, timezone
+  result = {**metadata, "published_at": datetime.now(timezone.utc).isoformat(), "release_id": release_id, "install_page_url": release_url + "/index.html",
     "latest_url": f"{base_url}/apps/{quote(bundle)}/index.html", "manifest_url": manifest_url,
     "ipa_url": release_url + "/app.ipa", "install_url": install_url,
     "published": False, "installed": False}
@@ -288,11 +291,5 @@ def publish_ipa(state: Path, metadata: dict, base_url: str) -> dict:
   atomic_write(app_dir / "index.html", page(metadata, install_url))
   write_json(state / "releases" / f"{release_id}.json", result)
   write_json(state / "latest.json", result)
-  entries = []
-  for path in sorted((site / "apps").glob("*/index.html")):
-    app_id = path.parent.name
-    entries.append(f'<li><a href="{html.escape(base_url, quote=True)}/apps/{quote(app_id)}/index.html">{html.escape(app_id)}</a></li>')
-  atomic_write(site / "index.html", ('<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">'
-    '<title>iOS builds</title><body style="font:18px system-ui;max-width:40rem;margin:10vh auto;padding:1rem">'
-    '<h1>iOS builds</h1><ul>' + "".join(entries) + '</ul></body>').encode())
+  refresh_console(state, base_url)
   return result

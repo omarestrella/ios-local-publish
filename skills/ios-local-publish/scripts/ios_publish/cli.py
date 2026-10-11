@@ -185,7 +185,7 @@ def build(args, state: Path, config: dict) -> dict:
       raise PublishError(f"Exported build {metadata['build']} differs from requested build {record['requested_build']}. Configure CFBundleVersion to use $(CURRENT_PROJECT_VERSION); the IPA was not published.")
     apple.verify_signatures(ipa)
     result = {**record, **metadata, "status": "built", "signing": signing,
-      "signatures_verified": True, "published": False, "installed": False}
+      "signatures_verified": True, "configuration": configuration if not args.archive else None, "published": False, "installed": False}
     write_json(run_dir / "result.json", result)
     write_json(state / "last-build.json", result)
     return result
