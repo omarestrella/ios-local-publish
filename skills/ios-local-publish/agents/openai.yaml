@@ -1,0 +1,4 @@
+interface:
+  display_name: "iOS Local Publish"
+  short_description: "Build signed IPAs and share private install links"
+  default_prompt: "Use $ios-local-publish to build this iOS app and give me a private install link."
