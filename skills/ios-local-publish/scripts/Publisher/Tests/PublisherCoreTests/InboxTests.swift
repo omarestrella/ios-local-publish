@@ -20,7 +20,7 @@ import Testing
             #expect(try store.select()["id"] as? String == id)
             #expect(store.receivers(now: Date.now.addingTimeInterval(31))[0]["connected"] as? Bool == false)
             _ = try store.heartbeat(id, token: token, active: false)
-            #expect(throws: PublishError.self) { try store.select() }
+            #expect(try store.select()["id"] as? String == id)
         }
     }
     @Test func receiverCannotBeHijacked() throws {
@@ -29,20 +29,21 @@ import Testing
             #expect(throws: PublishError.self) { try store.heartbeat(id, token: String(repeating: "b", count: 64), active: true) }
         }
     }
-    @Test func deliveryReceiptAndPersistence() throws {
+    @Test func offlinePublicationAndPersistence() throws {
         try withStore { store, directory in
             _ = try store.bind(id, udid: udid)
+            _ = try store.heartbeat(id, token: token, active: false)
             let release: Object = ["release_id": "release", "devices": [udid], "build": "46", "name": "Juno", "ipa_path": "/private/artifact", "signing": "private"]
             let delivery = try store.deliver(id, release: release)
-            #expect(delivery["received"] as? Bool == false)
-            let inbox = try store.heartbeat(id, token: token, active: true)["releases"] as! [Object]
+            #expect(delivery["queued"] as? Bool == true)
+            let offlineRestart = try InboxStore(state: directory)
+            #expect(try offlineRestart.select()["id"] as? String == id)
+            let inbox = try offlineRestart.heartbeat(id, token: token, active: true)["releases"] as! [Object]
             #expect(inbox.count == 1)
             #expect(inbox[0]["ipa_path"] == nil && inbox[0]["signing"] == nil)
-            _ = try store.acknowledge(id, token: token, releases: ["release"])
             let restarted = try InboxStore(state: directory)
-            let receipt = restarted.receipt(id, releaseID: "release")
-            #expect(receipt["received"] as? Bool == true)
-            #expect(receipt["installed"] as? Bool == false)
+            let refreshed = try restarted.heartbeat(id, token: token, active: true)["releases"] as! [Object]
+            #expect(refreshed[0]["release_id"] as? String == "release")
         }
     }
     @Test func wrongDeviceCoverageStopsDelivery() throws {
@@ -57,6 +58,7 @@ import Testing
             let otherToken = String(repeating: "b", count: 64)
             _ = try store.connect(["id": other, "name": "Tablet", "platform": "iPad"], token: otherToken)
             _ = try store.bind(id, udid: udid)
+            _ = try store.bind(other, udid: "00000000-0000000000000002")
             _ = try store.deliver(id, release: ["release_id": "r", "devices": [udid]])
             let inbox = try store.heartbeat(other, token: otherToken, active: true)["releases"] as! [Object]
             #expect(inbox.isEmpty)

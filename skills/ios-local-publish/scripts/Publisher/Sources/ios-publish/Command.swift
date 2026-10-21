@@ -72,13 +72,12 @@ import Darwin
             try require(options.commands.dropFirst().first == "cleanup-legacy", "Use builds cleanup-legacy")
             return try await admin(state, "cleanup-legacy")
         case "receivers":
-            try options.check(["receiver", "udid", "release"])
+            try options.check(["receiver", "udid"])
             let verb = options.commands.dropFirst().first ?? "list"
             if verb == "list" { return try await admin(state, "receivers") }
             guard let id = options.get("receiver") else { throw PublishError("Use --receiver ID") }
             if verb == "bind", let udid = options.get("udid") { return try await admin(state, "bind", body: ["id": id, "udid": validateUDID(udid)]) }
-            if verb == "receipt", let release = options.get("release") { return try await admin(state, "receipt", body: ["id": id, "release_id": release]) }
-            throw PublishError("Use receivers list, bind --receiver ID --udid UDID, or receipt --receiver ID --release ID")
+            throw PublishError("Use receivers list, bind --receiver ID --udid UDID")
         case "devices":
             try options.check(["wifi", "connected"])
             try require(options.commands.dropFirst().first == "list", "Use devices list for provisioning identifiers; native receivers are listed separately")
@@ -101,14 +100,12 @@ import Darwin
                 return ["devices": result]
             }
         case "build", "publish":
-            try options.check(["project", "scheme", "configuration", "team", "archive", "build-number", "min-validity-days", "build-setting", "udid", "receiver", "ipa", "receipt-timeout"])
-            let timeout = Int(options.get("receipt-timeout") ?? "20") ?? -1
-            try require((0...300).contains(timeout), "--receipt-timeout must be 0...300 seconds")
+            try options.check(["project", "scheme", "configuration", "team", "archive", "build-number", "min-validity-days", "build-setting", "udid", "receiver", "ipa"])
             let days = Int(options.get("min-validity-days") ?? "30") ?? -1
             try require(days >= 0, "--min-validity-days must be nonnegative")
             if options.has("ipa") { try require(!["archive", "project", "scheme", "configuration", "build-number", "build-setting"].contains(where: options.has), "--ipa cannot be combined with source/archive build options") }
             if command == "build" {
-                try require(!options.has("ipa") && !options.has("receiver") && !options.has("receipt-timeout"), "build accepts --udid; use publish to deliver")
+                try require(!options.has("ipa") && !options.has("receiver"), "build accepts --udid; use publish to deliver")
                 guard let udid = options.get("udid") else { throw PublishError("build requires --udid HARDWARE_UDID") }
                 return try BuildPipeline.build(options, state: state, config: config, udid: validateUDID(udid), deviceName: "Developer device")
             }
@@ -124,15 +121,8 @@ import Darwin
             }
             var body: Object = ["id": id, "ipa_path": try string(metadata, "ipa_path"), "min_validity_days": days]
             if let configuration = metadata["configuration"] { body["configuration"] = configuration }
-            progress("Publishing to connected receiver \(receiver["name"] ?? id)")
-            var result = try await admin(state, "publish", body: body)
-            let deadline = Date.now.addingTimeInterval(Double(timeout))
-            while Date.now < deadline {
-                let receipt = try await admin(state, "receipt", body: ["id": id, "release_id": try string(result, "release_id")])
-                result["delivery"] = receipt
-                if receipt["received"] as? Bool == true { break }
-                try await Task.sleep(for: .milliseconds(500))
-            }
+            progress("Publishing to inbox \(receiver["name"] ?? id)")
+            let result = try await admin(state, "publish", body: body)
             try writeObject(result, to: state.appending(path: "latest.json"))
             return result
         case "inspect":
@@ -156,7 +146,6 @@ import Darwin
     service start [--https-port 8443] | status | stop
     receivers list
     receivers bind --receiver ID --udid HARDWARE_UDID
-    receivers receipt --receiver ID --release ID
     builds cleanup-legacy
     init --project App.xcodeproj --scheme App [--team TEAM]
     publish [--receiver ID] [--project PATH --scheme APP] [--configuration Debug]

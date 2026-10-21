@@ -121,7 +121,6 @@ final class PublisherClient {
         try FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(inbox).write(to: cacheURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         update(inbox.releases, catalog: inbox.apps ?? [])
-        _ = try await request("receipts", body: ["release_ids": inbox.releases.map(\.releaseID)])
     }
 
     func saveApp(bundleID: String, name: String) async -> Bool {

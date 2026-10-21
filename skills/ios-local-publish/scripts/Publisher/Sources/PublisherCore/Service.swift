@@ -67,7 +67,6 @@ public func healthID(_ state: URL) -> Object { ["service": "ios-publish", "site_
                     case "/admin/receivers": return HTTPResponse(json: ["receivers": store.receivers()])
                     case "/admin/select": return HTTPResponse(json: try store.select(body["id"] as? String))
                     case "/admin/bind": return HTTPResponse(json: try store.bind(string(body, "id"), udid: string(body, "udid")))
-                    case "/admin/receipt": return HTTPResponse(json: store.receipt(try string(body, "id"), releaseID: try string(body, "release_id")))
                     case "/admin/cleanup-legacy":
                         return HTTPResponse(json: try catalog.pruneLegacy(keeping: store.releaseIDs()))
                     case "/admin/check-version":
@@ -83,8 +82,7 @@ public func healthID(_ state: URL) -> Object { ["service": "ios-publish", "site_
                         if let configuration = body["configuration"] as? String { metadata["configuration"] = configuration }
                         let release = try await publish(metadata)
                         var result = release
-                        do { result["delivery"] = try store.deliver(id, release: release) }
-                        catch { throw PublishError("IPA is hosted at \(release["ipa_url"] ?? "") but receiver disconnected. Reuse --ipa \(path) after reconnecting.") }
+                        result["delivery"] = try store.deliver(id, release: release)
                         try writeObject(result, to: state.appending(path: "latest.json"))
                         return HTTPResponse(json: result)
                     default: return HTTPResponse(404, json: ["error": "Unknown endpoint"])
@@ -120,9 +118,6 @@ public func healthID(_ state: URL) -> Object { ["service": "ios-publish", "site_
                     }
                     try catalog.removeApp(bundle)
                     return HTTPResponse(json: ["deleted": true])
-                case "/api/receipts":
-                    guard let ids = body["release_ids"] as? [String] else { throw PublishError("Invalid receipt list") }
-                    return HTTPResponse(json: try store.acknowledge(string(body, "id"), token: credential, releases: ids))
                 default: return HTTPResponse(404, json: ["error": "Unknown endpoint"])
                 }
             }
@@ -153,7 +148,7 @@ public func healthID(_ state: URL) -> Object { ["service": "ios-publish", "site_
         var components = URLComponents(); components.scheme = "itms-services"; components.host = ""; components.queryItems = [.init(name: "action", value: "download-manifest"), .init(name: "url", value: manifestURL)]
         let install = components.string!
         var release = metadata
-        release.merge(["release_id": id, "published_at": iso(), "install_page_url": url + "/index.html", "latest_url": baseURL + "/apps/\(bundle)/index.html", "manifest_url": manifestURL, "ipa_url": ipaURL, "install_url": install, "installed": false, "published": true]) { _, new in new }
+        release.merge(["release_id": id, "published_at": iso(), "install_page_url": url + "/index.html", "latest_url": baseURL + "/apps/\(bundle)/index.html", "manifest_url": manifestURL, "ipa_url": ipaURL, "install_url": install, "published": true]) { _, new in new }
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: staging) }
         try FileManager.default.copyItem(at: URL(filePath: try string(metadata, "ipa_path")), to: staging.appending(path: "app.ipa"))

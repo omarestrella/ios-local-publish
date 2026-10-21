@@ -18,7 +18,7 @@ Agents can use XcodeBuildMCP's device build-and-run workflow after checking its 
 
 The app's Publisher screen lists Bonjour-advertised Mac services on local Wi-Fi. Select one, or enter its HTTPS base_url manually over a remote Tailscale connection. The app remembers the URL and a random credential in Keychain. No separate Mac-phone pairing protocol is needed.
 
-Open the app and keep it foregrounded. Select the matching inbox ID from receivers list, identify its hardware UDID with devices list, and bind them once:
+Open the app once to register it. Future builds can be published while it is closed. Select the matching inbox ID from receivers list, identify its hardware UDID with devices list, and bind them once:
 
 ```sh
 PUBLISH receivers list --json

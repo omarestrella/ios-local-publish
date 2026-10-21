@@ -55,18 +55,6 @@ import Foundation
         try save()
         return ["releases": deliveries[id, default: []].map { $0["payload"] as? Object ?? [:] }, "lease_seconds": Self.lease]
     }
-    public func acknowledge(_ id: String, token: String, releases: [String]) throws -> Object {
-        try authenticate(id, token)
-        try require(releases.count <= 1000, "Too many receipts")
-        let ids = Set(releases)
-        deliveries[id] = deliveries[id, default: []].map { delivery in
-            var delivery = delivery
-            if ids.contains(delivery["release_id"] as? String ?? "") { delivery["received_at"] = iso() }
-            return delivery
-        }
-        try save()
-        return ["received": true, "installed": false]
-    }
     public func receivers(now: Date = .now) -> [Object] {
         devices.values.map { row in
             var result = row
@@ -76,10 +64,10 @@ import Foundation
         }.sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
     }
     public func select(_ id: String? = nil) throws -> Object {
-        let online = receivers().filter { $0["connected"] as? Bool == true && (id == nil || $0["id"] as? String == id) }
-        try require(online.count == 1, "Open Publish on the target device. Use --receiver ID when several are connected; run receivers list.")
-        try require(online[0]["udid"] as? String != nil, "Bind this inbox to its hardware provisioning UDID: receivers bind --receiver ID --udid UDID")
-        return online[0]
+        let candidates = receivers().filter { row in id.map { row["id"] as? String == $0 } ?? (row["udid"] as? String != nil) }
+        try require(candidates.count == 1, "Select a registered inbox with --receiver ID; run receivers list. Connect Publish once to register a new device.")
+        try require(candidates[0]["udid"] as? String != nil, "Bind this inbox to its hardware provisioning UDID: receivers bind --receiver ID --udid UDID")
+        return candidates[0]
     }
     public func bind(_ id: String, udid: String) throws -> Object {
         let udid = try validateUDID(udid)
@@ -99,10 +87,6 @@ import Foundation
             deliveries[id, default: []].insert(["release_id": releaseID, "payload": payload], at: 0)
         }
         try save()
-        return receipt(id, releaseID: releaseID)
-    }
-    public func receipt(_ id: String, releaseID: String) -> Object {
-        let delivery = deliveries[id, default: []].first { $0["release_id"] as? String == releaseID }
-        return ["receiver_id": id, "queued": delivery != nil, "received": delivery?["received_at"] != nil, "installed": false]
+        return ["receiver_id": id, "queued": true]
     }
 }

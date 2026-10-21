@@ -36,7 +36,6 @@ try {
  const bind=await post('/admin/bind',{id,udid:hardwareUDID},'test-admin-token');assert.equal(bind.status,200);
  const list=await (await post('/admin/receivers',{},'test-admin-token')).json();assert.equal(list.receivers[0].connected,true);
  assert.equal(list.receivers[0].secret_hash,undefined);
- assert.equal((await post('/api/receipts',{id,release_ids:[]})).status,200);
  const app='com.example.catalog';
  assert.equal((await post('/api/apps/save',{id,bundle_id:app,name:'Temporary app'})).status,200);
  assert.equal((await post('/api/apps/save',{id,bundle_id:app,name:'Renamed app'})).status,200);
@@ -46,14 +45,14 @@ try {
  snapshot=await (await post('/api/heartbeat',{id})).json();
  assert.ok(!snapshot.apps.some(a=>a.bundle_id===app));
  if(ipa){
+  await post('/api/heartbeat',{id,active:false});
+  assert.equal((await post('/admin/select',{id},'test-admin-token')).status,200);
   execFileSync('tailscale',['serve','--bg','--yes','--https=8443','--set-path='+mount,'http://127.0.0.1:'+port],{stdio:'pipe'});
   const publication=await post('/admin/publish',{id,ipa_path:resolve(ipa),min_validity_days:30},'test-admin-token');
   const release=await publication.json();assert.equal(publication.status,200,JSON.stringify(release));
-  assert.equal(release.hosting_verified,true);assert.equal(release.delivery.received,false);assert.ok(release.install_url.startsWith("itms-services://?"));
+  assert.equal(release.hosting_verified,true);assert.equal(release.delivery.queued,true);assert.ok(release.install_url.startsWith("itms-services://?"));
   const inbox=await (await post('/api/heartbeat',{id})).json();assert.equal(inbox.releases[0].release_id,release.release_id);
-  await post('/api/receipts',{id,release_ids:[release.release_id]});
-  const receipt=await (await post('/admin/receipt',{id,release_id:release.release_id},'test-admin-token')).json();assert.equal(receipt.received,true);assert.equal(receipt.installed,false);
-  console.log('Real signed IPA passed signature/profile validation, trusted HTTPS manifest/full-IPA verification, inbox delivery and receipt (isolated test receiver).');
+  console.log('Real signed IPA passed signature/profile validation, trusted HTTPS manifest/full-IPA verification, offline publication and later refresh (isolated test receiver).');
   assert.equal((await post('/api/builds/delete',{id,release_id:release.release_id})).status,200);
   assert.equal((await (await post('/api/heartbeat',{id})).json()).releases.length,0);
   const lower=await post('/admin/check-version',{bundle_id:release.bundle_id,version:'0.0.0',build:'1'},'test-admin-token');
@@ -64,5 +63,5 @@ try {
  assert.equal(await (await fetch(base+'/artifact.ipa')).text(),'fixture IPA bytes');
  await post('/api/heartbeat',{id,active:false});
  const off=await (await post('/admin/receivers',{},'test-admin-token')).json();assert.equal(off.receivers[0].connected,false);
- console.log('Swift daemon HTTP protocol passed: enrollment, isolation, admin authorization, binding, presence, receipts, GET/HEAD');
+ console.log('Swift daemon HTTP protocol passed: enrollment, isolation, admin authorization, binding, presence, GET/HEAD');
 } finally {if(ipa)execFileSync('tailscale',['serve','--https=8443','--set-path='+mount,'off'],{stdio:'pipe'});process.kill('SIGTERM');await new Promise(r=>process.once('exit',r));await rm(state,{recursive:true,force:true});}

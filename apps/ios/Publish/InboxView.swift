@@ -91,11 +91,9 @@ struct InboxView: View {
             .task(id: "\(scenePhase)-\(connectionID)") {
                 if scenePhase == .active {
                     discovery.start()
-                    UIApplication.shared.isIdleTimerDisabled = true
                     await client.run()
                 } else {
                     discovery.stop()
-                    UIApplication.shared.isIdleTimerDisabled = false
                     await client.disconnect()
                 }
             }

@@ -108,7 +108,7 @@ public struct BuildPipeline {
             let metadata = try Signing.inspect(ipa, requiredUDID: udid, days: days)
             try require(requested == nil || requested == metadata["build"] as? String, "Exported CFBundleVersion differs from the reserved build. Use $(CURRENT_PROJECT_VERSION) in Info.plist.")
             record.merge(metadata) { _, new in new }
-            record["status"] = "built"; record["published"] = false; record["installed"] = false
+            record["status"] = "built"; record["published"] = false
             try writeObject(record, to: runDirectory.appending(path: "result.json"))
             try writeObject(record, to: state.appending(path: "last-build.json"))
             return record

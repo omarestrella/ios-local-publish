@@ -1,4 +1,4 @@
 interface:
   display_name: "iOS Local Publish"
   short_description: "Deliver signed builds to your native device inbox"
-  default_prompt: "Use $ios-local-publish to build this iOS app and deliver it to my connected Publish inbox."
+  default_prompt: "Use $ios-local-publish to build this iOS app and deliver it to my Publish inbox for retrieval later."

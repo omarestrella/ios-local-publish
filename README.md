@@ -1,6 +1,6 @@
 # Publish
 
-A native iPhone/iPad inbox for developer builds, backed by a Swift Mac service. An agent builds and signs your app, publishes to a connected inbox, and you tap **Install** to approve the usual iOS installation prompt. No TestFlight processing.
+A native iPhone/iPad inbox for developer builds, backed by a Swift Mac service. An agent builds and signs your app, publishes to a server-backed inbox, and you tap **Install** to approve the usual iOS installation prompt. No TestFlight processing.
 
 ## Install the agent skill
 
@@ -15,7 +15,7 @@ The skill includes the complete Swift CLI package. Default symlink installs and 
 - macOS 14+, full Xcode with Swift 6+, and `asc` authenticated to your paid Apple Developer team.
 - A distribution certificate/private key in Keychain; registered bundle IDs and capabilities for the app and its extensions.
 - Tailscale on the Mac and devices. HTTPS enabled for the tailnet, with policy allowing device access to the Mac.
-- The **Publish** app installed on the target iPhone or iPad. Keep it open for discovery and delivery.
+- The **Publish** app installed on the target iPhone or iPad. Connect it once to register; open it whenever you want to retrieve and install builds.
 
 ## Start the Mac service
 
@@ -51,9 +51,9 @@ Open Publish, choose your nearby Mac under **Publisher**, or enter its `base_url
 ./ios-publish publish --receiver RECEIVER_ID --json
 ```
 
-Binding associates an inbox with an already identified provisioning device; it does not pair a network connection. `devices list` reports Xcode hardware UDIDs and CoreDevice identifiers separately. Use the hardware UDID for signing. If exactly one bound receiver is connected, `--receiver` may be omitted. Several connected devices require explicit selection. Nothing automatically selects every discovered device.
+Binding associates an inbox with an already identified provisioning device; it does not pair a network connection. `devices list` reports Xcode hardware UDIDs and CoreDevice identifiers separately. Use the hardware UDID for signing. If exactly one registered receiver is bound, `--receiver` may be omitted. Several bound devices require explicit selection. Nothing automatically selects every discovered device.
 
-Source builds reserve increasing build numbers without editing source files. Signing and HTTPS are checked before compilation. The device connection and profile coverage are checked again before delivery. If the device disconnects during the build, the completed IPA is retained for a retry:
+Source builds reserve increasing build numbers without editing source files. Signing and HTTPS are checked before compilation. Profile coverage is checked before publication. The device may be offline: builds are queued durably on the Mac and fetched when Publish next opens. Existing IPA files can also be published:
 
 ```sh
 ./ios-publish publish --receiver RECEIVER_ID --ipa /path/to/App.ipa --json
@@ -66,7 +66,6 @@ Other commands:
 ./ios-publish publish --receiver ID --archive App.xcarchive --json
 ./ios-publish build --project App.xcodeproj --scheme App --udid HARDWARE_UDID --json
 ./ios-publish inspect App.ipa --udid HARDWARE_UDID --json
-./ios-publish receivers receipt --receiver ID --release RELEASE_ID --json
 ./ios-publish service status --json
 ./ios-publish doctor --json
 ./ios-publish latest --json
@@ -81,7 +80,7 @@ The Mac service has no remote build or signing endpoint. The agent runs Xcode/as
 
 Devices with tailnet access can enroll a new inbox, but enrollment cannot bind a UDID or publish a build. Artifact URLs are private to the tailnet and are bearer-like unguessable links; the system installer must be able to fetch them without the app's authorization headers.
 
-`published` means the HTTPS manifest and IPA checksum were verified. `delivery.received` means the app fetched and saved its inbox and acknowledged the release. Neither proves installation or launch. The app opens the system installer on your tap; it never claims silent installation, uninstalls apps, or deletes their data.
+`published` means the HTTPS manifest and IPA checksum were verified and the build is stored on the server. Publication completes without contacting the phone. Publish refreshes its available builds when opened. The app opens the system installer on your tap; publication does not establish installation or launch.
 
 State lives in `~/.local/share/ios-publish`, or the saved machine settings, `IOS_PUBLISH_HOME`, or explicit `--state-dir`. Existing build ledgers, IPA artifacts, and source configuration are reused. Old browser-console routes are no longer the product interface. A minimal Safari install page remains for the system handoff.
 
