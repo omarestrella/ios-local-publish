@@ -1,6 +1,6 @@
 # Publish client API
 
-This is the contract for a replacement Publish client, including a Juno/Quasar implementation. It describes the current Swift server, not a proposed API. No receipt or installation-reporting protocol exists.
+This is the contract for a replacement Publish client, including a equivalent client built in Juno. It describes the current Swift server, not a proposed API. No receipt or installation-reporting protocol exists.
 
 ## Base URL and discovery
 
@@ -152,7 +152,7 @@ Current behavior (including its nonstandard status choices):
 - Unsupported methods return 405. Use POST for every `/api/*` operation.
 - JSON bodies are limited to 64 KiB; the total buffered request is limited to 128 KiB. Oversized or malformed requests may close the connection rather than return a JSON error.
 - There are no pagination, WebSocket, or server-sent-event APIs.
-- Browser CORS/preflight is not implemented. A browser-based Quasar build cannot assume cross-origin `fetch` will work. Use the native host's HTTP binding, or implement and verify CORS separately if a browser client is intended.
+- Browser CORS/preflight is not implemented. A browser-based client cannot assume cross-origin `fetch` will work. Use the native host's HTTP binding, or implement and verify CORS separately if a browser client is intended.
 
 Show connection errors with retry. Keep cached builds visible where useful. Do not require an active client as part of the agent's publish workflow.
 
@@ -181,11 +181,11 @@ await post('apps/save', { bundle_id: 'com.example.app', name: 'Example' });
 const refreshed: Inbox = await post('heartbeat');
 ```
 
-## Juno/Quasar implementation handoff
+## equivalent client built in Juno handoff
 
 Build a client against this contract. Keep the Swift Mac service unchanged. Implement server selection, secure persistent identity, initial registration, cached app/build listing, refresh, add/rename/delete app entries, build deletion with confirmation, expiry handling, and user-triggered installation. Use system-native colors. Do not implement receipts or block publishing on the app being open.
 
-Native capabilities needed: isolated Keychain storage, optional Bonjour browsing, and an installer URL-opening binding. HTTP and local caching use existing runtime APIs. Confirm that the chosen Quasar runtime exposes these capabilities; a standard browser alone cannot supply them.
+Native capabilities needed: isolated Keychain storage, optional Bonjour browsing, and an installer URL-opening binding. HTTP and local caching use existing runtime APIs. Confirm that the chosen Juno runtime exposes these capabilities; a standard browser alone cannot supply them.
 
 Verify: first registration; later reconnect with the same identity; publication while the client is closed followed by refresh; cached offline display; mutations and shared deletion; denied access to another inbox; real-device installer prompt. Do not equate a displayed build or accepted installer URL with completed installation.
 
