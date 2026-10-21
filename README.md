@@ -2,6 +2,8 @@
 
 A native iPhone/iPad inbox for developer builds, backed by a Swift Mac service. An agent builds and signs your app, publishes to a server-backed inbox, and you tap **Install** to approve the usual iOS installation prompt. No TestFlight processing.
 
+Building another client? See the [client API contract and Juno/Quasar handoff](docs/client-api.md) for authentication, endpoints, data models, discovery, installation, and implementation checks.
+
 ## Install the agent skill
 
 ```sh
