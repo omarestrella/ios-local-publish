@@ -150,7 +150,7 @@ Current behavior (including its nonstandard status choices):
 - Validation, authentication, authorization, and caught file/server errors return HTTP **400** with `{"error":"message"}`. Do not assume 401/403 or silently replace credentials after an error.
 - Unknown API endpoints return 404 with that JSON error shape.
 - Unsupported methods return 405. Use POST for every `/api/*` operation.
-- Request headers and JSON bodies are limited to 64 KiB each by the HTTP parser.
+- JSON bodies are limited to 64 KiB; the total buffered request is limited to 128 KiB. Oversized or malformed requests may close the connection rather than return a JSON error.
 - There are no pagination, WebSocket, or server-sent-event APIs.
 - Browser CORS/preflight is not implemented. A browser-based Quasar build cannot assume cross-origin `fetch` will work. Use the native host's HTTP binding, or implement and verify CORS separately if a browser client is intended.
 
