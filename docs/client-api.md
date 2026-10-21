@@ -1,14 +1,14 @@
 # Publish client API
 
-This is the contract for a replacement Publish client, including a equivalent client built in Juno. It describes the current Swift server, not a proposed API. No receipt or installation-reporting protocol exists.
+HTTP API exposed by the Publish Mac service.
 
 ## Base URL and discovery
 
-The Mac CLI's `ios-publish service status --json` returns `base_url`, for example `https://your-mac.your-tailnet.ts.net:8443/ios-publish`. Preserve its port and path prefix. Append endpoint paths to that prefix; resolving `/api/connect` against the origin would incorrectly drop `/ios-publish`.
+The Mac CLI's `ios-publish service status --json` returns `base_url`, for example `https://your-mac.your-tailnet.ts.net:8443/ios-publish`. All endpoint paths are appended to this base URL, including its port and path prefix.
 
-Use trusted HTTPS and the device's Tailscale connection. Same Wi-Fi is not required. The Mac must be awake and reachable when refreshing or installing.
+The service uses trusted HTTPS over Tailscale. Same Wi-Fi is not required. The Mac must be awake and reachable when refreshing or installing.
 
-Optional local Bonjour discovery: browse `_ios-publish._tcp` in `local.`. The service's TXT record `url` contains the complete HTTPS base URL. Use that value rather than constructing an HTTP URL from its Bonjour hostname. Bonjour does not discover remote Tailscale nodes; allow entering and saving the URL.
+The service advertises `_ios-publish._tcp` in `local.`. The service's TXT record `url` contains the complete HTTPS base URL. The Bonjour hostname is separate from this HTTPS URL. Bonjour discovery is local to the network; remote Tailscale connections use the HTTPS URL directly.
 
 `GET {base_url}/healthz` has no authentication and returns:
 
@@ -20,12 +20,12 @@ Optional local Bonjour discovery: browse `_ios-publish._tcp` in `local.`. The se
 
 ## Identity and authentication
 
-Generate one persistent identity per client installation/project:
+A receiver identity consists of:
 
-- `id`: UUID string recommended; accepted pattern `^[A-Za-z0-9-]{16,64}$`.
-- `token`: cryptographically random 32-byte value encoded as 64 hexadecimal characters recommended; accepted pattern `^[A-Za-z0-9_-]{32,128}$`.
+- `id`: accepted pattern `^[A-Za-z0-9-]{16,64}$`.
+- `token`: accepted pattern `^[A-Za-z0-9_-]{32,128}$`.
 
-Persist both securely in project-isolated Keychain storage. Reuse them across launches. Losing the token prevents authenticating its existing ID; do not generate a new token for that same ID. The token is chosen by the client, not issued by the server.
+The native client persists its ID and token in device-local Keychain storage. Its ID is a UUID and its token is two concatenated UUIDs without hyphens. The server stores the token hash. An existing ID requires its original token. The token is chosen by the client, not issued by the server.
 
 All `/api/*` endpoints use POST with a JSON object and these headers:
 
@@ -34,7 +34,7 @@ Authorization: Bearer YOUR_TOKEN
 Content-Type: application/json
 ```
 
-Every request includes `id` in its body. No cookies or Mac admin token are needed. Never distribute the Mac's admin credential to a client.
+Every request includes `id` in its body. These endpoints use receiver credentials, not cookies or the separate Mac admin token.
 
 ## Endpoint reference
 
@@ -67,7 +67,7 @@ ios-publish receivers list --json
 ios-publish receivers bind --receiver RECEIVER_ID --udid HARDWARE_UDID --json
 ```
 
-The iOS app cannot obtain that UDID itself. A replacement client with a new identity must be bound once before an agent can publish builds to it. Builds are scoped to receiver identity; a new client identity does not automatically inherit the old client's inbox.
+The iOS app cannot obtain that UDID itself. Publishing to a receiver requires its identity to be bound to a provisioning UDID. Builds are scoped to receiver identity; a new client identity does not automatically inherit the old client's inbox.
 
 ### Refresh builds and catalog
 
@@ -75,9 +75,9 @@ The iOS app cannot obtain that UDID itself. A replacement client with a new iden
 {"id":"12345678-1234-4234-8234-123456789abc","active":true}
 ```
 
-Despite its historical name, `/api/heartbeat` is the inbox refresh endpoint. `active` defaults to true. It updates informational presence and returns the complete current snapshot, not a delta. A client may refresh on launch, foreground, pull-to-refresh, and after mutations. The existing native client also polls every five seconds while open; polling is optional.
+`/api/heartbeat` returns the inbox snapshot. `active` defaults to true. It updates informational presence and returns the complete current snapshot, not a delta. The native client refreshes on foreground, pull-to-refresh, and after mutations, and polls every five seconds while open.
 
-`lease_seconds: 30` only controls the Mac's connected indicator. It does not expire credentials, stored builds, or permission to publish. Closing the client must not block publishing. An optional `active:false` call updates presence; no shutdown call is required for correctness.
+`lease_seconds: 30` only controls the Mac's connected indicator. It does not expire credentials, stored builds, or permission to publish. Publication accepts offline receivers. An `active:false` call marks the receiver inactive; absence of that call does not affect publication.
 
 ```ts
 interface App {
@@ -89,8 +89,8 @@ interface Build {
   release_id: string;       // Stable row identity; opaque string.
   name: string;             // Name from the IPA; catalog name may override display.
   bundle_id: string;
-  version: string;          // Marketing version; retain as string.
-  build: string;            // CFBundleVersion; retain as string (may contain dots).
+  version: string;          // Marketing version.
+  build: string;            // CFBundleVersion; may contain dots.
   configuration?: string;  // For example Debug or Release.
   published_at?: string;   // ISO 8601 timestamp.
   size_bytes: number;
@@ -108,7 +108,7 @@ interface Inbox {
 }
 ```
 
-Ignore unknown response fields. Releases are returned newest insertion first; catalog apps are sorted by name. Group builds by `bundle_id`; prefer the catalog name, falling back to the build name. Preserve catalog entries with no builds. Replace cached snapshots on refresh so deletions disappear; do not only append new releases. Cache locally to show the last snapshot when offline, and distinguish cached content from a successful current refresh.
+Releases are returned newest insertion first; catalog apps are sorted by name. Catalog entries can have no builds. The native client groups builds by `bundle_id`, uses the catalog name when present, and caches the complete snapshot locally. A refresh replaces the snapshot, including deleted entries.
 
 The client receives install URLs, not private Mac filesystem paths. There is no authenticated IPA download endpoint or upload endpoint for mobile clients.
 
@@ -118,43 +118,41 @@ The client receives install URLs, not private Mac filesystem paths. There is no 
 
 A client can manage entries it created or apps whose builds are in its inbox. Names are server catalog values shared by viewers of that app.
 
-Confirm destructive actions before calling deletion endpoints:
+Deletion behavior:
 
 - `builds/delete` deletes that published build and its hosted artifacts, and removes it from every inbox containing it. The requesting inbox must contain the build.
 - `apps/delete` deletes the visible app entry and all its published builds, including those listed in other inboxes.
 
-Neither operation uninstalls an app or deletes its on-device data. Deletion does not reset the server's highest published version/build. Refresh after successful mutations.
+Neither operation uninstalls an app or deletes its on-device data. Deletion does not reset the server's highest published version/build.
 
 ## Installation
 
-Installation begins only on a user's tap. Disable Install after `expires_at`; do not treat an unparseable expiry as installable.
+The native client starts installation on an Install tap. It disables installation when `expires_at` is past or cannot be parsed.
 
-Before opening an install URL, validate that it has scheme `itms-services`, query `action=download-manifest`, and a `url` query value pointing to HTTPS on the configured server's origin and beneath its base path. Validate the fallback landing page against the same server boundary. Parse URLs; do not accept arbitrary remote installer links.
+The server supplies an `itms-services` URL with `action=download-manifest` and a `url` query value pointing to the hosted HTTPS manifest beneath `base_url`. The fallback landing page is also beneath `base_url`.
 
-If JSKit exposes `installer.install(manifestURL)`, extract the manifest URL from `install_url` and pass it to that binding. Otherwise open the supplied installer URL through a native URL-opening bridge. The server currently constructs this form:
+Installer URL format:
 
 ```text
 itms-services://?action=download-manifest&url=ENCODED_HTTPS_MANIFEST_URL
 ```
 
-Use URL/query APIs to encode values. If native opening fails, the existing client opens `install_page_url` in Safari. iOS then presents its normal installation confirmation. A successful URL-open result means only that the request was accepted, not that installation finished.
+The native client opens the installer URL through UIKit. If opening fails, it opens `install_page_url` in Safari. iOS then presents its normal installation confirmation. A successful URL-open result means only that the request was accepted, not that installation finished.
 
-The manifest and IPA URLs are accessible without bearer headers so the system installer can fetch them; access is restricted by the private Tailscale network. Keep the Mac and Tailscale reachable throughout installation. Do not send API tokens in URLs.
+The manifest and IPA URLs are accessible without bearer headers so the system installer can fetch them; access is restricted by the private Tailscale network. The Mac and Tailscale connection are required during installation. Installer URLs contain no API tokens.
 
-There are no receipts, acknowledgments, install-status callbacks, or completion reports to send. Server publication finishes independently of the client. Refreshing later reveals the stored builds.
+There are no receipts, acknowledgments, install-status callbacks, or completion reports. Server publication finishes independently of the client. Refreshing later reveals the stored builds.
 
 ## Errors and transport limits
 
-Current behavior (including its nonstandard status choices):
+HTTP behavior:
 
-- Validation, authentication, authorization, and caught file/server errors return HTTP **400** with `{"error":"message"}`. Do not assume 401/403 or silently replace credentials after an error.
+- Validation, authentication, authorization, and caught file/server errors return HTTP **400** with `{"error":"message"}`.
 - Unknown API endpoints return 404 with that JSON error shape.
-- Unsupported methods return 405. Use POST for every `/api/*` operation.
+- Unsupported methods return 405.
 - JSON bodies are limited to 64 KiB; the total buffered request is limited to 128 KiB. Oversized or malformed requests may close the connection rather than return a JSON error.
 - There are no pagination, WebSocket, or server-sent-event APIs.
-- Browser CORS/preflight is not implemented. A browser-based client cannot assume cross-origin `fetch` will work. Use the native host's HTTP binding, or implement and verify CORS separately if a browser client is intended.
-
-Show connection errors with retry. Keep cached builds visible where useful. Do not require an active client as part of the agent's publish workflow.
+- Browser CORS response headers and preflight handling are not implemented.
 
 ## Minimal client sequence
 
@@ -176,17 +174,11 @@ async function post(path: string, fields: Record<string, unknown> = {}) {
 
 await post('connect', { name: deviceName, platform: 'iPhone' });
 const snapshot: Inbox = await post('heartbeat');
-// Render snapshot. On a user action:
+// App catalog mutation:
 await post('apps/save', { bundle_id: 'com.example.app', name: 'Example' });
 const refreshed: Inbox = await post('heartbeat');
 ```
 
-## equivalent client built in Juno handoff
+## Source references
 
-Build a client against this contract. Keep the Swift Mac service unchanged. Implement server selection, secure persistent identity, initial registration, cached app/build listing, refresh, add/rename/delete app entries, build deletion with confirmation, expiry handling, and user-triggered installation. Use system-native colors. Do not implement receipts or block publishing on the app being open.
-
-Native capabilities needed: isolated Keychain storage, optional Bonjour browsing, and an installer URL-opening binding. HTTP and local caching use existing runtime APIs. Confirm that the chosen Juno runtime exposes these capabilities; a standard browser alone cannot supply them.
-
-Verify: first registration; later reconnect with the same identity; publication while the client is closed followed by refresh; cached offline display; mutations and shared deletion; denied access to another inbox; real-device installer prompt. Do not equate a displayed build or accepted installer URL with completed installation.
-
-Implementation references: `apps/ios/Publish/PublisherClient.swift`, `Models.swift`, `Identity.swift`, `Discovery.swift`; server routes and validation are in `skills/ios-local-publish/scripts/Publisher/Sources/PublisherCore/{Service,InboxStore,Catalog}.swift`. The integration check is `scripts/check-service.mjs`.
+Client: `apps/ios/Publish/{PublisherClient,Models,Identity,Discovery}.swift`. Server: `skills/ios-local-publish/scripts/Publisher/Sources/PublisherCore/{Service,InboxStore,Catalog}.swift`. Integration check: `scripts/check-service.mjs`.
