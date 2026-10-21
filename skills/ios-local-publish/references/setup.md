@@ -1,46 +1,35 @@
-# Setup and state
+# Setup
 
-## Prerequisites
+Install full Xcode with Swift 6+, authenticate `asc` to the intended Apple Developer team, and install Tailscale on the Mac and devices. Add the distribution certificate and private key to Keychain. Register the target application and extension bundle IDs/capabilities with Apple. `--team` selects expected signing identity; it does not change asc authentication.
 
-Run the bundled launcher with `doctor --json`. It reports tools, Xcode, Apple authentication, signing identities, the configured team's distribution certificate, and Tailscale readiness. An inactive hosting route alone is expected before the first publish.
-
-- macOS, selected full Xcode, and Python 3.11+. Use `xcode-select -p` and `xcodebuild -version` to diagnose the selected developer directory.
-- The `asc` CLI, authenticated to the intended Apple Developer team. Use `asc auth status` and `asc auth --help` for the installed CLI's supported setup. The tool was exercised with asc 3.7.0 and Xcode 27; inspect command help if a different version rejects an option.
-- A paid Apple Developer account and a valid distribution certificate **with its private key** in the local Keychain. The CLI matches local identities to the authenticated team's Apple certificate records; it does not create a new certificate. Import the team's existing signing material through the normal secure Keychain workflow when missing. Never put a `.p12`, API private key, or password into this skill.
-- The app and extension bundle IDs and required capabilities registered in that team. Xcode must be able to archive the project. The exporter creates or reuses ad hoc profiles for every embedded `.app` and `.appex`.
-- Tailscale running on the Mac and target devices, with HTTPS Serve available and tailnet policy allowing access. Its executable must be on PATH; GUI app installations may require separately installing the CLI. A shell alias is insufficient for subprocess calls. Both GUI and open-source macOS variants work through the bundled loopback server. Do not expose it publicly with Funnel.
-- Registered physical iPhone/iPad targets; enable Developer Mode on development devices if required by their configuration. Initial Wi-Fi discovery requires prior pairing with Xcode; a device can be remote/offline for later builds and installation.
-
-Primary references when current platform behavior needs verification: [asc](https://github.com/rudrankriyam/App-Store-Connect-CLI), [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve), and [Apple ad hoc distribution](https://developer.apple.com/help/account/provisioning-profiles/create-an-ad-hoc-provisioning-profile/).
-
-## Initial configuration
-
-Here `PUBLISH` means the absolute path to `scripts/ios-local-publish` in this skill.
+Run the bundled Swift launcher:
 
 ```sh
-PUBLISH init --project /path/to/App.xcodeproj --scheme App --team TEAM_ID --json
-PUBLISH devices list --wifi --json
-PUBLISH devices register --udid IPHONE_HARDWARE_UDID --json
-PUBLISH publish --json
+PUBLISH service start --json
 ```
 
-Repeat `--udid` for several selected devices. `devices register` saves that complete target set; it does not append to the previous set. `devices register --wifi` saves all currently discovered paired physical Wi-Fi devices, so use it only when that matches the request. `--connected` requires `--wifi` for registration/build/publish and additionally requires a live CoreDevice tunnel. `devices list --connected` can inspect all live transports. The hardware provisioning UDID differs from the CoreDevice identifier and simulator ID; malformed IDs are rejected before contacting Apple.
+Use `--https-port 8443` if another service uses 443. The service is a Swift executable supervised by a user LaunchAgent, with private HTTPS from Tailscale Serve. The route and executable survive checkout moves or skill updates. Re-run service start after updating the skill to deploy the new executable.
 
-For a one-off device selection, pass repeated `--udid` to `build` or `publish`. The profiles must include every selected device in every bundle. Adding a device requires a new export/publication; the old IPA cannot acquire new coverage from its link.
+## Native app bootstrap
 
-## State and upgrades
+The source repository contains `apps/ios/Publish.xcodeproj`, scheme `Publish`, bundle ID `net.bitcreative.iospublish`, iOS/iPadOS 18+. Select your developer team and run it on the intended phone/tablet. This development install requires an existing Xcode device pairing or an initial cable pairing.
 
-State selection, highest priority first:
+Agents can use XcodeBuildMCP's device build-and-run workflow after checking its current help and session defaults. Provide the source project's exact path, the intended CoreDevice ID, and `DEVELOPMENT_TEAM=YOUR_TEAM` / `-allowProvisioningUpdates` as build arguments. Optionally set `PUBLISHER_URL` to the service's base_url to preconfigure your own build. No personal defaults or secrets are checked into the project. Generated project sources are maintained in `apps/ios/project.yml`.
 
-1. `PUBLISH --state-dir /absolute/path COMMAND ...`
-2. `IOS_PUBLISH_HOME`
-3. `state_dir` in `~/.config/ios-local-publish/settings.json` (or `IOS_LOCAL_PUBLISH_SETTINGS`)
-4. `~/.local/share/ios-publish`
+The app's Publisher screen lists Bonjour-advertised Mac services on local Wi-Fi. Select one, or enter its HTTPS base_url manually over a remote Tailscale connection. The app remembers the URL and a random credential in Keychain. No separate Mac-phone pairing protocol is needed.
 
-Install with `npx skills add omarestrella/ios-local-publish --skill ios-local-publish`, or add `--global --agent codex claude-code`. The entire runtime is in this directory and works with copy or symlink installs without post-install hooks. The optional repository installer saves machine settings outside the skill and adopts old checkout-local state only with explicit `--adopt-checkout-state`. All launchers share these state rules. A portable skill bundle contains source code and instructions only.
+Open the app and keep it foregrounded. Select the matching inbox ID from receivers list, identify its hardware UDID with devices list, and bind them once:
 
-State contains `config.json`, the per-project/scheme build-number ledger, run logs and archives/IPAs, release metadata, the served `site/`, and local-server metadata. Keep it when upgrading the skill. One writer is permitted per state directory; readers can still inspect status. Several apps can share the same state and route, with separate per-bundle latest pages. `latest` reports the most recently published app globally.
+```sh
+PUBLISH receivers list --json
+PUBLISH devices list --wifi --json
+PUBLISH receivers bind --receiver INBOX_ID --udid HARDWARE_UDID --json
+```
 
-The file server binds only to `127.0.0.1`, runs under a per-state user LaunchAgent, and Tailscale proxies `/ios-publish` over HTTPS. The route is checked for ownership before modification. The LaunchAgent starts at login and after crashes; it does not keep the Mac awake or run before login. Build logs, profiles, and configuration stay outside `site/`. Old releases are retained until deliberately removed.
+The app cannot retrieve its hardware UDID. Binding is a local admin action; any authenticated inbox cannot claim a provisioning identity by itself. Devices on the tailnet may enroll inboxes but cannot publish or bind them remotely without the Mac admin credential.
 
-Use `npx skills update ios-local-publish` for a skills-managed installation; use the repository installer for its own managed installation. Do not mix installers on the same destination. Upgrades preserve external state and active hosting. The LaunchAgent's server script lives in `state/server-runtime/`, so removing a skill copy does not delete the running server's code. `serve start` refreshes stale server code and missing program paths and checks real HTTPS readiness. Run `serve stop` before deliberately decommissioning hosting, and retain state if published links must remain available.
+## Storage
+
+State defaults to `~/.local/share/ios-publish`. Selection precedence is explicit `--state-dir`, `IOS_PUBLISH_HOME`, machine settings at `~/.config/ios-local-publish/settings.json`, then the default. `IOS_LOCAL_PUBLISH_SETTINGS` selects another machine-settings file. Skill reinstallation does not replace service state or builds.
+
+Keep the Mac awake through installation. The device app may go offline after starting the system installer; artifact hosting continues independently on the Mac.

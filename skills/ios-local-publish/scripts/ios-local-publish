@@ -1,29 +1,8 @@
-#!/usr/bin/env python3
-"""Self-contained skill entry point; machine state stays outside the bundle."""
-import json
-from pathlib import Path
-import sys
-
-sys.dont_write_bytecode = True
-
-
-def fail(message):
-  if "--json" in sys.argv:
-    print(json.dumps({"ok": False, "error": message}))
-  else:
-    print(f"Error: {message}", file=sys.stderr)
-  raise SystemExit(1)
-
-
-if sys.version_info < (3, 11):
-  fail("ios-local-publish requires Python 3.11 or later.")
-
-scripts = Path(__file__).resolve().parent
-sys.path.insert(0, str(scripts))
-if not (scripts / "ios_publish" / "cli.py").is_file():
-  fail("Skill runtime is missing. Reinstall the complete ios-local-publish skill directory.")
-
-from ios_publish.cli import main
-
-if __name__ == "__main__":
-  main()
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+CACHE="${IOS_PUBLISH_BUILD_CACHE:-$HOME/Library/Caches/ios-local-publish/swift-build}"
+# Build products stay outside installed skills. SwiftPM serializes concurrent builds.
+swift build --package-path "$ROOT/Publisher" --scratch-path "$CACHE" -c release >&2
+BIN=$(swift build --package-path "$ROOT/Publisher" --scratch-path "$CACHE" -c release --show-bin-path)
+exec "$BIN/ios-publish" "$@"

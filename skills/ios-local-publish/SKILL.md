@@ -1,42 +1,55 @@
 ---
 name: ios-local-publish
-description: Build an Xcode iOS app, export an ad hoc signed IPA, and share a private OTA install link through this Mac and Tailscale. Use for developer or agent distribution to registered iPhones and iPads without TestFlight, including devices on remote networks.
+description: Build and sign an iOS app on a Mac, then deliver it to a connected native Publish inbox on an iPhone or iPad over Tailscale, without TestFlight.
 ---
 
 # iOS Local Publish
 
-Use the bundled `scripts/ios-local-publish` CLI. It archives with `asc`, signs the main app and extensions for registered devices, and publishes a verified HTTPS install page through Tailscale Serve. Python 3.11+ and macOS are required. The installed bundle contains the runtime; no source checkout or Python package installation is needed.
+Use the bundled `scripts/ios-local-publish` launcher relative to this SKILL.md (called `PUBLISH` below). It compiles the self-contained Swift utility outside the installed skill. Requires macOS, full Xcode with Swift 6+, authenticated `asc`, a local distribution private key, and Tailscale. No Python is used.
 
-Resolve the launcher relative to this `SKILL.md`; use its absolute path in commands. Examples below call that path `PUBLISH`. Read [setup.md](references/setup.md) for a new machine, unconfigured project, device selection, or missing dependencies. Read [troubleshooting.md](references/troubleshooting.md) when a command or installation fails.
+## Select the native inbox
 
-## Choose the app and devices
+1. Check `PUBLISH service status --json`; start or update the Mac service with `PUBLISH service start --json` when needed. It manages only its own Tailscale HTTPS mount and LaunchAgent. For a port conflict, use `service start --https-port 8443`; never stop another service or reset Tailscale Serve.
+2. Run `PUBLISH receivers list --json`. The user opens **Publish** on the target iPhone/iPad. It must connect and remain open during delivery. Local Bonjour advertises the Mac; remote devices enter the returned service `base_url` once. Tailscale node online status and an Xcode development tunnel do not establish an active inbox.
+3. Select the requested receiver ID. If exactly one bound receiver is connected, the CLI can infer it. When several are connected, pass `--receiver ID`. Do not publish to all discovered devices.
+4. For an unbound inbox, identify the intended physical device with `PUBLISH devices list --wifi --json` and run `PUBLISH receivers bind --receiver ID --udid HARDWARE_UDID --json`. The app cannot read its provisioning UDID. CoreDevice UUIDs are not provisioning UDIDs. Do not guess the association from an ambiguous device name.
 
-- Start with `PUBLISH doctor --json` and `PUBLISH devices list --json` to inspect readiness and saved targets. Reuse an existing configuration when it matches the request. Do not register every discovered device when the user selected only one.
-- Accept an exact `.xcodeproj`, `.xcworkspace`, or source directory with one unambiguous project. Determine the shared app scheme from the project or `xcodebuild -list -json`; do not guess it. Build the requested checkout, including its current changes. Do not edit the app's bundle ID, signing settings, server URLs, or version files to accommodate this tool.
-- On first setup, save defaults with `PUBLISH init --project /path/to/App.xcodeproj --scheme App --team TEAM_ID --json`, then select/register the authorized hardware UDIDs. Wi-Fi discovery exposes paired physical devices, including sleeping development tunnels. Devices need not remain discoverable after registration.
-- One shared state directory owns this Mac's `/ios-publish` route and can host several apps. To publish another app without changing defaults, pass `--project` and `--scheme` to `publish`; specify `--team` and repeated `--udid` when they differ from the saved defaults. Ensure `asc` is authenticated to that team first: `--team` does not switch accounts. A second state directory cannot take over the existing route.
+The native Publish app must first be installed from this repository's `apps/ios/Publish.xcodeproj` with Xcode or XcodeBuildMCP. See [setup](references/setup.md) for bootstrapping and remote connections. Skill installation alone does not install the device app.
 
-## Build and publish
+## Build and deliver
+
+Reuse matching saved source defaults or pass an exact application project/workspace and shared scheme. Build the requested checkout including its changes. Do not change its bundle ID, signing settings, app URLs, marketing version, or build scripts to accommodate this utility. Build-number updates below are required.
 
 ```sh
-PUBLISH publish --json
-PUBLISH publish --project /path/to/App.xcworkspace --scheme App --json
+PUBLISH init --project /path/to/App.xcodeproj --scheme App --team TEAM_ID --json
+PUBLISH publish --receiver ID --json
+PUBLISH publish --receiver ID --project /path/to/App.xcworkspace --scheme App --configuration Debug --json
+PUBLISH publish --receiver ID --archive /path/to/App.xcarchive --json
+PUBLISH publish --receiver ID --ipa /path/to/App.ipa --json
 ```
 
-Use `build` instead of `publish` for an IPA without hosting. Reuse an archive with `publish --archive /path/to/App.xcarchive`; publish an already signed ad hoc IPA with `publish --ipa /path/to/App.ipa`. Both retain the existing build number.
+Publishing requires a live, bound inbox before compilation and rechecks its lease and IPA device coverage before delivery. A disconnected target leaves its completed IPA available for a later `--ipa` retry. Do not silently fall back to a browser link as delivery.
 
-Source builds reserve a build number above the scheme's project version and local history before archiving. Failed attempts may leave gaps. If the installed app came from TestFlight, Xcode, or another publisher, inspect its build or ask for it and pass `--build-number HIGHER_NUMBER` once. Remote distribution history is not queried. Subsequent source builds advance automatically.
+Always increment the Xcode project's build number for every new source build you deliver, including Debug builds and direct Xcode/XcodeBuildMCP device installs. Change `CURRENT_PROJECT_VERSION` (CFBundleVersion), not `MARKETING_VERSION`. For generated projects, update the authoritative generator configuration and regenerate the project. Keep app and embedded extension build numbers aligned.
 
-Repeat `--build-setting KEY=VALUE` for project-specific Xcode arguments. Build scripts run as configured by the target project; inspect them when external side effects matter. Do not automatically disable uploads or change build behavior. The CLI creates missing ad hoc profiles and registers selected devices as needed for an authorized publish; it never creates/revokes certificates or deletes unrelated profiles.
+For CLI source builds, automatic numbering reserves a number above the project, ledger, and published floor without editing source. After a successful build, persist the actual exported build number back to the project's authoritative configuration before finishing. For direct Xcode installs, increment and persist the project number before building, using a number above the last delivered build. Do not reuse a number for changed app bytes. Retrying delivery of the exact same archive/IPA retains its existing number.
 
-Signing preflight and HTTPS readiness run before compilation. Certificates and export profiles need more than 30 days of validity by default; use `--min-validity-days N` only when a shorter lifetime is intentional. Source build flags with `--archive`/`--ipa`, or `--connected` without `--wifi` for a build, are rejected. A hardcoded exported build number that ignores the reservation is an error; configure `CFBundleVersion` to use `$(CURRENT_PROJECT_VERSION)`.
+When replacing a build from TestFlight or another publisher, inspect its build or ask for it and use `--build-number HIGHER_NUMBER` once. The IPA's exported number must match the reservation. Use `$(CURRENT_PROJECT_VERSION)` for CFBundleVersion. Debug compilation exports ad hoc distribution signing, not debugger-attach signing.
 
-## Return evidence
+Certificates and profiles need more than 30 days of lifetime by default. Only lower `--min-validity-days N` intentionally. `--team` does not switch the authenticated asc account. Missing bundle IDs/capabilities or distribution private keys require setup; the utility never creates/revokes certificates. It may register the selected device and create a covering ad hoc profile for an authorized publish. Embedded extensions are checked too.
 
-Every command accepts `--json`: one result on stdout, progress on stderr, and a nonzero exit on failure. The global `--state-dir /absolute/path` must precede the subcommand. Override state with that flag or `IOS_PUBLISH_HOME`; otherwise the launcher uses the machine's saved settings and finally `~/.local/share/ios-publish`.
+`--build-setting KEY=VALUE` passes project-specific Xcode arguments. An archive/IPA retains its own compilation settings and number and cannot be combined with source build overrides. Use `PUBLISH build --udid UDID ... --json` only for an IPA without native delivery.
 
-On success, return the clickable `install_page_url`, version/build, and IPA path when useful. `latest_url` is a stable per-app page; `install_page_url` identifies this immutable release. The CLI checks signatures, every embedded provisioning profile, device coverage, expiry, hosted manifest, install page, and the entire downloaded IPA's checksum before promoting latest.
+## Report evidence
 
-`published: true` proves publication and download from the Mac. It does not prove device installation or launch; `installed` remains false. Verify those separately only when requested, and distinguish observed installed version from user-reported operation. An ordinary personal device must open the page in Safari and approve installation. The Mac must stay awake and both ends must have Tailscale access; a cable and shared Wi-Fi are unnecessary.
+Return the app version/build, selected receiver, and `delivery.received`. The Mac verifies signatures, profile coverage, hosted manifest, and full hosted IPA checksum. The app acknowledges only after fetching and saving the inbox. A queued release without a receipt is not confirmed device delivery; check `PUBLISH receivers receipt --receiver ID --release ID --json` or explain the disconnected/timeout state.
 
-For status or the previous link, use `PUBLISH serve status --json` or `PUBLISH latest --json`. Only run `serve stop` when stopping hosting is requested. It removes this tool's route and LaunchAgent; existing other Tailscale routes are preserved. Do not use Funnel, reset Serve, uninstall an app, or remove its local data as an automatic repair.
+`installed` stays false: delivery never proves installation or launch. The user taps Install in the native inbox and approves the iOS prompt. The Mac must remain awake and Tailscale reachable during installation. Do not uninstall the target app or erase its data as an automatic fix.
+
+Use `PUBLISH doctor --json`, `service status --json`, and `latest --json` for diagnostics. Stop hosting only when requested with `service stop`. Preserve other Tailscale routes; never use Funnel or reset Serve. Read [troubleshooting](references/troubleshooting.md) when a command fails.
+
+## Library management and version policy
+
+The native app can add/rename/delete app entries and delete builds. Deletion removes server artifacts and inbox entries, never the installed application or its local data. App deletion includes its published builds. Use `PUBLISH builds cleanup-legacy --json` only when cleanup is requested; it preserves native inbox deliveries and the last standalone build while removing old browser-publisher artifacts.
+
+Publishing a lower marketing version, or a lower build within the same version, is an error. The highest published version is retained even after deletion. Reusing a version/build with different IPA bytes is also rejected. Do not bypass this by deleting history or rewriting the source version. Report the mismatch and build the intended newer source. Automatic source build numbering incorporates the published floor when available.

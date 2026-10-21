@@ -1,0 +1,47 @@
+name: Publish
+options:
+  bundleIdPrefix: net.bitcreative
+  deploymentTarget:
+    iOS: '18.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.9'
+    TARGETED_DEVICE_FAMILY: '1,2'
+    CURRENT_PROJECT_VERSION: '1'
+    MARKETING_VERSION: '0.3.0'
+    CODE_SIGN_STYLE: Automatic
+    PUBLISHER_URL: ''
+targets:
+  Publish:
+    type: application
+    platform: iOS
+    sources:
+      - Publish
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Publish
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        NSLocalNetworkUsageDescription: Find your Mac publishing service and receive developer builds.
+        NSBonjourServices:
+          - _ios-publish._tcp
+        PublisherURL: $(PUBLISHER_URL)
+        LSApplicationQueriesSchemes:
+          - itms-services
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.bitcreative.iospublish
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+schemes:
+  Publish:
+    build:
+      targets:
+        Publish: all

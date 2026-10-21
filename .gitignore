@@ -17,3 +17,16 @@ build/
 .agents/
 .claude/
 skills-lock.json
+.build/
+.swiftpm/
+xcuserdata/
+*.xcuserstate
+.xcodebuildmcp/
+DerivedData/
+*.app/
+*.dSYM/
+*.xcresult/
+*.xcdistributionlogs/
+*.key
+*.pem
+*.cer
